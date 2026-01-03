@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shopglobal
+  namespace: dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: shopglobal
+  template:
+    metadata:
+      labels:
+        app: shopglobal
+    spec:
+      containers:
+        - name: web
+          image: __IMAGE__
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
