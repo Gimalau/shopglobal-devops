@@ -1,0 +1,60 @@
+name: ci-cd
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build_scan_push_deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute tag
+        run: echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Run tests
+        run: |
+          chmod +x tests/test.sh
+          tests/test.sh
+
+      - name: Docker login to ACR (admin user)
+        run: |
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ secrets.ACR_LOGIN_SERVER }} \
+            -u "${{ secrets.ACR_USERNAME }}" --password-stdin
+
+      - name: Build image
+        run: |
+          IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/shopglobal:${TAG}
+          docker build -t $IMAGE .
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: table
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+
+      - name: Push image
+        run: docker push ${{ env.IMAGE }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: |
+          echo "${{ secrets.KUBECONFIG_B64 }}" | base64 -d > kubeconfig
+          echo "KUBECONFIG=$PWD/kubeconfig" >> $GITHUB_ENV
+
+      - name: Deploy to AKS (dev)
+        run: |
+          kubectl create namespace dev --dry-run=client -o yaml | kubectl apply -f -
+          sed -i "s|__IMAGE__|${IMAGE}|g" k8s/dev/deployment.yaml
+          kubectl apply -f k8s/dev/
+          kubectl rollout status deployment/shopglobal -n dev
+          kubectl get pods -n dev
+          kubectl get svc -n dev
